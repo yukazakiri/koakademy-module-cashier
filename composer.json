@@ -36,6 +36,12 @@
             ]
         }
     },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true,
+            "wikimedia/composer-merge-plugin": true
+        }
+    },
     "scripts": {
         "test": "pest --compact tests/Unit/PackageContractTest.php"
     }
