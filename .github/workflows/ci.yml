@@ -81,12 +81,12 @@ jobs:
           composer config repositories.package-under-test '{"type":"path","url":"../extension","options":{"symlink":false}}'
           composer require --dev 'koakademy/cashier:*@dev' --with-dependencies --no-interaction --prefer-dist
           php artisan modules:validate --all --no-interaction
-      - name: Exercise the installed package and its host workflows
-        working-directory: host
-        run: php vendor/bin/pest --configuration=phpunit.extensions.xml ../extension/tests tests/Feature/EnrollmentServiceUndoCashierTest.php
       - name: Build browser and SSR assets from the installed package
         working-directory: host
         run: |
           npm ci
           php artisan wayfinder:generate --no-interaction
           npm run build
+      - name: Exercise the installed package and its host workflows
+        working-directory: host
+        run: php vendor/bin/pest --configuration=phpunit.extensions.xml ../extension/tests tests/Feature/EnrollmentServiceUndoCashierTest.php
