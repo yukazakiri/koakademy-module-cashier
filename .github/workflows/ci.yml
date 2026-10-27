@@ -1,33 +1,92 @@
 name: Package CI
 
 on:
-    push:
-    pull_request:
+  push:
+  pull_request:
+  workflow_dispatch:
 
 permissions:
-    contents: read
+  contents: read
 
 jobs:
-    test:
-        runs-on: ubuntu-latest
-        timeout-minutes: 15
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: "8.5.12"
+          extensions: mbstring, bcmath, intl, gd, zip, sqlite3
+          coverage: none
+          tools: composer:v2
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/composer/files
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.json') }}
+      - run: composer validate --strict
+      - run: composer install --no-interaction --prefer-dist --no-progress
+      - run: find app config database routes tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: composer test
+      - name: Check release tag matches the manifest
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: php -r '$m=json_decode(file_get_contents("module.json"),true,512,JSON_THROW_ON_ERROR); if (getenv("RELEASE_TAG") !== "v".$m["version"]) { fwrite(STDERR,"Tag and module.json version differ.\n"); exit(1); }'
 
-        steps:
-            - uses: actions/checkout@v4
-
-            - uses: shivammathur/setup-php@v2
-              with:
-                  php-version: '8.5'
-                  extensions: mbstring
-                  coverage: none
-
-            - uses: actions/cache@v4
-              with:
-                  path: ~/.composer/cache
-                  key: composer-${{ runner.os }}-${{ hashFiles('composer.json') }}
-                  restore-keys: composer-${{ runner.os }}-
-
-            - run: composer validate --strict
-            - run: composer install --no-interaction --prefer-dist --no-progress
-            - run: find . -path './vendor' -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l
-            - run: composer test
+  host:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      APP_ENV: testing
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      DB_CONNECTION: sqlite
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+      PULSE_ENABLED: "false"
+      TELESCOPE_ENABLED: "false"
+      NIGHTWATCH_ENABLED: "false"
+      INERTIA_SSR_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: extension
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: yukazakiri/koakademy
+          ref: ff3cae913b14b11737380446472f2119e3e60b28 # First merged extension SDK; pin the tested host revision.
+          path: host
+          persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: "8.5.12"
+          extensions: mbstring, bcmath, pcntl, intl, gd, zip, sqlite3
+          coverage: none
+          tools: composer:v2
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26.12.1"
+          cache: npm
+          cache-dependency-path: host/package-lock.json
+      - name: Replace the bundled copy in the isolated host checkout
+        working-directory: host
+        run: |
+          cp .env.example .env
+          rm -rf -- Modules/Cashier
+          composer config repositories.package-under-test '{"type":"path","url":"../extension","options":{"symlink":false}}'
+          composer require --dev 'koakademy/cashier:*@dev' --with-dependencies --no-interaction --prefer-dist
+          php artisan modules:validate --all --no-interaction
+      - name: Exercise the installed package and its host workflows
+        working-directory: host
+        run: php vendor/bin/pest --configuration=phpunit.extensions.xml ../extension/tests tests/Feature/EnrollmentServiceUndoCashierTest.php
+      - name: Build browser and SSR assets from the installed package
+        working-directory: host
+        run: |
+          npm ci
+          php artisan wayfinder:generate --no-interaction
+          npm run build
