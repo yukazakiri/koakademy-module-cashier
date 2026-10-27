@@ -9,23 +9,21 @@ Cashier workflows for student balance lookup and payment posting.
 - Laravel 13, Filament 5, and nwidart/laravel-modules 13
 - A host application that uses the KoAkademy module loader
 
-The package is distributed through the public [KoAkademy Composer
-repository](https://yukazakiri.github.io/koakademy-modules). The Marketplace
-catalog does not install PHP code into a running container; Composer and the
-application image do that.
+Public releases are intended for [Packagist](https://packagist.org/). The
+Marketplace catalog is reviewed separately and does not install PHP code into
+a running container; Composer and the application image do that.
 
 ## Installation
 
-Run the following commands from the host application's repository root:
+After `v1.1.0` is tagged and the package is published on Packagist, run the
+following commands from the host application's repository root:
 
-    composer config repositories.koakademy composer https://yukazakiri.github.io/koakademy-modules
-    composer require koakademy/cashier:^1.0
+    composer require koakademy/cashier:^1.1
     php artisan migrate --force
     php artisan optimize:clear
 
-If the host already has the koakademy Composer repository configured, only the
-composer require command is needed. Commit composer.json and composer.lock; do
-not install the package only inside one running replica.
+Commit composer.json and composer.lock; do not install the package only inside
+one running replica. The command requires the version to be published first.
 
 ### Docker, Swarm, Dokploy, and Kubernetes
 
@@ -103,7 +101,8 @@ It exercises package discovery and relevant host workflows, then builds browser
 and SSR assets. Pin/update the tested host revision deliberately. Additional
 frontend dependencies require a reviewed host npm lockfile change.
 
-After review, merge and tag `v1.1.0` with a matching `module.json` version. The
-registry proposes a separately reviewed, signed catalog update. A catalog entry
+After review, merge and tag `v1.1.0` with a matching `module.json` version.
+Submit the public repository to Packagist and verify that version is visible.
+The registry proposes a separately reviewed, signed catalog update. A catalog entry
 does not update a running school image: the application must commit its Composer
 lockfile and deploy a new build. Tags have not been published by this proposal.

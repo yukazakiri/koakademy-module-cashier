@@ -1,6 +1,16 @@
 {
     "name": "koakademy/cashier",
     "description": "Cashier workflows for student balance lookup and payment posting.",
+    "homepage": "https://github.com/yukazakiri/koakademy-module-cashier",
+    "keywords": [
+        "koakademy",
+        "school-management",
+        "cashier"
+    ],
+    "support": {
+        "issues": "https://github.com/yukazakiri/koakademy-module-cashier/issues",
+        "source": "https://github.com/yukazakiri/koakademy-module-cashier"
+    },
     "type": "library",
     "license": "AGPL-3.0-or-later",
     "authors": [
