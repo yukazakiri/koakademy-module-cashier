@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace Modules\Cashier\Filament\Pages;
 
+use App\Models\AdminTransaction;
 use App\Models\GeneralSetting;
+use App\Models\StudentTuition;
 use App\Models\Transaction;
+use App\Services\EnrollmentBillingService;
 use BackedEnum;
 use BezhanSalleh\FilamentShield\Traits\HasPageShield;
 // use Filament\Pages\Actions\Action;
@@ -30,7 +33,9 @@ use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
+use Modules\Cashier\Exceptions\MissingTuitionRecordException;
 use UnitEnum;
 
 final class Cashier extends Page implements HasForms
@@ -956,66 +961,90 @@ final class Cashier extends Page implements HasForms
 
     public function create(): void
     {
-        // this is slow i think but too lazy to optimize it
         $student = $this->data['selectedStudent'];
-        // $amount = $this->data['amount'];
         $description = $this->data['description'];
         $schoolYear = $this->data['selectedSchoolYear'];
         $semester = $this->data['selectedSemester'];
-        // $transactionType = $this->data['transaction_type'];
         $settlements = $this->data['settlements'];
         $totalAmount = array_sum(array_map('floatval', array_values($settlements)));
         $invoicenumber = $this->data['invoicenumber'];
-        $studentEnrollmentId = null;
-        if (
-            isset($settlements['tuition_fee']) &&
-            $settlements['tuition_fee'] > 0
-        ) {
-            $studentTuition = $student->StudentTuition
-                ->where('school_year', $schoolYear)
-                ->where('semester', $semester)
-                ->first();
-            $studentEnrollmentId = $studentTuition?->enrollment_id;
-            $studentTuition->total_balance -= $settlements['tuition_fee'];
-            $studentTuition->status = 'Paid';
-            $studentTuition->save();
+        $tuitionFee = (float) ($settlements['tuition_fee'] ?? 0);
+
+        try {
+            DB::transaction(function () use (
+                $student,
+                $description,
+                $schoolYear,
+                $semester,
+                $settlements,
+                $totalAmount,
+                $invoicenumber,
+                $tuitionFee
+            ): void {
+                $studentTuition = null;
+
+                if ($tuitionFee > 0) {
+                    $studentTuition = StudentTuition::query()
+                        ->where('student_id', $student->id)
+                        ->where('school_year', $schoolYear)
+                        ->where('semester', $semester)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if (! $studentTuition instanceof StudentTuition) {
+                        throw new MissingTuitionRecordException('No tuition record exists for the selected student, school year, and semester.');
+                    }
+                }
+
+                $transaction = Transaction::create([
+                    'description' => $description,
+                    'settlements' => $settlements,
+                    'status' => 'Paid',
+                    'transaction_date' => now(),
+                    'invoicenumber' => $invoicenumber,
+                    'signature' => GeneralSetting::first()->enable_signatures === false
+                            ? null
+                            : $this->data['signature'],
+                    'user_id' => Auth::id(),
+                ]);
+                $student->studentTransactions()->create([
+                    'student_enrollment_id' => $studentTuition?->enrollment_id,
+                    'transaction_id' => $transaction->id,
+                    'amount' => $totalAmount,
+                    'status' => 'Paid',
+                ]);
+
+                // Create admin transaction record
+                AdminTransaction::create([
+                    'admin_id' => Auth::id(),
+                    'transaction_id' => $transaction->id,
+                    'amount' => $totalAmount,
+                    'type' => 'credit',
+                    'description' => $description,
+                    'status' => 'Paid',
+                ]);
+
+                // Recompute the balance from the ledger instead of decrementing
+                // the row that was read before the ledger entry existed.
+                if ($studentTuition instanceof StudentTuition) {
+                    app(EnrollmentBillingService::class)->syncTuitionBalance($studentTuition);
+                }
+            });
+        } catch (MissingTuitionRecordException $exception) {
+            Notification::make('payment_failed')
+                ->title('Transaction Not Created')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+
+            return;
         }
-
-        // create the transaction
-        $transaction = Transaction::create([
-            'description' => $description,
-            'settlements' => $settlements,
-            'status' => 'Paid',
-            'transaction_date' => now(),
-            'invoicenumber' => $invoicenumber,
-            'signature' => GeneralSetting::first()->enable_signatures === false
-                    ? null
-                    : $this->data['signature'],
-            'user_id' => Auth::id(),
-        ]);
-        $student->studentTransactions()->create([
-            'student_enrollment_id' => $studentEnrollmentId,
-            'transaction_id' => $transaction->id,
-            'amount' => $totalAmount,
-            'status' => 'Paid',
-        ]);
-
-        // Create admin transaction record
-        \App\Models\AdminTransaction::create([
-            'admin_id' => Auth::id(),
-            'transaction_id' => $transaction->id,
-            'amount' => $totalAmount,
-            'type' => 'credit',
-            'description' => $description,
-            'status' => 'Paid',
-        ]);
 
         Notification::make('success')
             ->title('Transaction Created')
             ->body('Transaction has been created successfully')
             ->sendToDatabase(Auth::user())
             ->send();
-
     }
 
     public function saveStudentTuition(): void
