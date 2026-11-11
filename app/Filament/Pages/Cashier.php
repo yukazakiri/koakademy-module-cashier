@@ -41,8 +41,6 @@ use UnitEnum;
 final class Cashier extends Page implements HasForms
 {
     use HasPageShield;
-
-    // use HasPageShield;
     use InteractsWithForms;
 
     public ?array $data = [];
@@ -60,11 +58,10 @@ final class Cashier extends Page implements HasForms
 
     protected static ?int $navigationSort = 1;
 
-    // public $selectedStudent = null;
-    // public static function canAccess(): bool
-    // {
-    //     return Auth::user()->hasPermissionTo('page_Cashier');
-    // }
+    public static function canAccess(): bool
+    {
+        return (bool) (Auth::user()?->can('page_Cashier') || Auth::user()?->can('View:Cashier'));
+    }
 
     public function mount(): void
     {
